@@ -16,3 +16,6 @@ tokio-rustls = "0.23.4"
 
 [patch.crates-io]
 rustls = { git = "https://github.com/rustls/rustls", rev = "a981f0914eb517788a09f3e764fe64f527e0181e" }
+
+[profile.dev.package."*"]
+opt-level = 2
