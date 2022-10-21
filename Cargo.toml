@@ -5,17 +5,14 @@ edition = "2021"
 
 [dependencies]
 color-eyre = "0.6.2"
-hring = { path = "../hring" }
-ktls = { path = "../ktls" }
+hring = { git = "https://github.com/hapsoc/hring", rev = "a554257" }
+ktls = "1.0.0"
 rcgen = "0.10.0"
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
-rustls = { version = "0.20.6", features = ["secret_extraction"] }
+rustls = { version = "0.20.7", features = ["secret_extraction"] }
 tokio = { version = "1.21.2", features = ["full"] }
 tokio-rustls = "0.23.4"
-
-[patch.crates-io]
-rustls = { git = "https://github.com/rustls/rustls", rev = "a981f0914eb517788a09f3e764fe64f527e0181e" }
 
 [profile.dev.package."*"]
 opt-level = 2

@@ -218,6 +218,7 @@ dependencies = [
 [[package]]
 name = "hring"
 version = "0.1.0"
+source = "git+https://github.com/hapsoc/hring?rev=a554257#a5542570e129826d00ba09191a2b0779bc864313"
 dependencies = [
  "eyre",
  "futures",
@@ -272,7 +273,9 @@ dependencies = [
 
 [[package]]
 name = "ktls"
-version = "0.1.0"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0f0468272c908747985d98a4bbe98e6619ec87db31caace1fff2c4a6322da23"
 dependencies = [
  "futures",
  "ktls-sys",
@@ -280,6 +283,7 @@ dependencies = [
  "memoffset",
  "pin-project-lite",
  "rustls",
+ "smallvec",
  "thiserror",
  "tokio",
  "tokio-rustls",
@@ -288,8 +292,9 @@ dependencies = [
 
 [[package]]
 name = "ktls-sys"
-version = "0.1.0"
-source = "git+https://github.com/hapsoc/ktls-sys?rev=798466d#798466d7c3e659ecdf035afac0bea2b679aea4c4"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13a44aeddd3581dea0fc96dc056585b4e4b25bcce730c4b03f614ff6c97fc3c6"
 
 [[package]]
 name = "lazy_static"
@@ -578,8 +583,9 @@ checksum = "7ef03e0a2b150c7a90d01faf6254c9c48a41e95fb2a8c2ac1c6f0d2b9aefc342"
 
 [[package]]
 name = "rustls"
-version = "0.20.6"
-source = "git+https://github.com/rustls/rustls?rev=a981f0914eb517788a09f3e764fe64f527e0181e#a981f0914eb517788a09f3e764fe64f527e0181e"
+version = "0.20.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "539a2bfe908f471bfa933876bd1eb6a19cf2176d375f82ef7f99530a40e48c2c"
 dependencies = [
  "log",
  "ring",
