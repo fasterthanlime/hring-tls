@@ -218,12 +218,12 @@ dependencies = [
 [[package]]
 name = "hring"
 version = "0.1.0"
-source = "git+https://github.com/hapsoc/hring?rev=a554257#a5542570e129826d00ba09191a2b0779bc864313"
+source = "git+https://github.com/hapsoc/hring?rev=37095ba#37095bad7b158ad29b4b91c7efb806cec6d0b47d"
 dependencies = [
  "eyre",
- "futures",
  "memmap2",
  "nom",
+ "pretty-hex",
  "smallvec",
  "thiserror",
  "tokio",
@@ -498,6 +498,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
+name = "pretty-hex"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6fa0831dd7cc608c38a5e323422a0077678fa5744aa2be4ad91c4ece8eec8d5"
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -759,7 +765,7 @@ dependencies = [
 [[package]]
 name = "tokio-uring"
 version = "0.3.0"
-source = "git+https://github.com/fasterthanlime/tokio-uring?rev=f80c1a6b12417a16f06d3329ec65d7ec28620390#f80c1a6b12417a16f06d3329ec65d7ec28620390"
+source = "git+https://github.com/fasterthanlime/tokio-uring?rev=428529a3037e6c36680cfdfa3305c5a1709fb8bd#428529a3037e6c36680cfdfa3305c5a1709fb8bd"
 dependencies = [
  "io-uring",
  "libc",
