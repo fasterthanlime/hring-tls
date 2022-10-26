@@ -5,9 +5,9 @@ edition = "2021"
 
 [dependencies]
 color-eyre = "0.6.2"
-# hring = { git = "https://github.com/hapsoc/hring", rev = "6506f23" }
-hring = { path = "../hring" }
-ktls = "1.0.0"
+hring = { git = "https://github.com/hapsoc/hring", rev = "3edb65c" }
+# hring = { path = "../hring" }
+ktls = "1.0.1"
 rcgen = "0.10.0"
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }

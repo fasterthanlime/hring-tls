@@ -9,10 +9,10 @@ use std::{
 };
 
 use color_eyre::eyre;
-use hring::{h1, tokio_uring::net::TcpStream, AggBuf, Body, IoChunkable, WriteOwned};
+use hring::{h1, tokio_uring::net::TcpStream, AggBuf, Body, WriteOwned};
 use rustls::ServerConfig;
 use tokio::net::TcpListener;
-use tracing::info;
+use tracing::{debug, info};
 use tracing_subscriber::EnvFilter;
 
 fn main() -> eyre::Result<()> {
@@ -71,13 +71,13 @@ async fn handle_conn(
     info!("Accepted connection from {remote_addr}");
     let stream = acceptor.accept(stream).await?;
 
-    info!("Performed TLS handshake");
+    debug!("Performed TLS handshake");
     let stream = ktls::config_ktls_server(stream)?;
 
-    info!("Set up kTLS");
+    debug!("Set up kTLS");
     let (drained, stream) = stream.into_raw();
     let drained = drained.unwrap_or_default();
-    info!("{} bytes already decoded by rustls", drained.len());
+    debug!("{} bytes already decoded by rustls", drained.len());
 
     let fd = stream.as_raw_fd();
     std::mem::forget(stream);
@@ -100,14 +100,18 @@ impl h1::ServerDriver for SDriver {
         req_body: &mut impl Body,
         respond: h1::Responder<T, h1::ExpectResponseHeaders>,
     ) -> eyre::Result<h1::Responder<T, h1::ResponseDone>> {
-        info!("Handling request!");
+        info!(
+            "Handling {} {}",
+            req.method.to_string_lossy(),
+            req.path.to_string_lossy()
+        );
 
         let addr = "httpbingo.org:80"
             .to_socket_addrs()?
             .next()
             .expect("http bingo should be up");
         let transport = Rc::new(TcpStream::connect(addr).await?);
-        info!("Connected to httpbingo");
+        debug!("Connected to httpbingo");
 
         let driver = CDriver { respond };
 
@@ -143,44 +147,28 @@ where
         res: hring::Response,
         body: &mut impl Body,
     ) -> eyre::Result<Self::Return> {
-        info!("Client got final response");
+        info!(
+            "Client got final response: {} {}",
+            res.code,
+            res.reason.to_string_lossy()
+        );
         let respond = self.respond;
 
         let mut respond = respond.write_final_response(res).await?;
 
-        loop {
-            info!("Reading from body {body:?}");
+        let trailers = loop {
+            debug!("Reading from body {body:?}");
             match body.next_chunk().await? {
-                hring::BodyChunk::Buf(buf) => {
-                    info!("Client got chunk of len {}", buf.len());
-                    respond = respond.write_body_chunk(buf).await?;
+                hring::BodyChunk::Chunk(chunk) => {
+                    debug!("Client got chunk of len {}", chunk.len());
+                    respond = respond.write_chunk(chunk).await?;
                 }
-                hring::BodyChunk::AggSlice(slice) => {
-                    let mut offset = 0;
-                    while let Some(buf) = slice.next_chunk(offset) {
-                        offset += buf.len() as u32;
-                        info!(
-                            "Client got chunk of len {} (via aggslice), offset is now {offset}",
-                            buf.len()
-                        );
-                        match buf {
-                            hring::IoChunk::Static(_) => unreachable!(),
-                            hring::IoChunk::Vec(_) => unreachable!(),
-                            hring::IoChunk::Buf(buf) => {
-                                respond = respond.write_body_chunk(buf).await?;
-                            }
-                        }
-                    }
-                    info!("End of aggslice");
-                }
-                hring::BodyChunk::Eof => {
-                    // all good
-                    info!("Client got EOF");
-                    break;
+                hring::BodyChunk::Done { trailers } => {
+                    break trailers;
                 }
             }
-        }
+        };
 
-        respond.finish_body(None).await
+        respond.finish_body(trailers).await
     }
 }
