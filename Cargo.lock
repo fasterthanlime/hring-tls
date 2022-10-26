@@ -218,7 +218,6 @@ dependencies = [
 [[package]]
 name = "hring"
 version = "0.1.0"
-source = "git+https://github.com/hapsoc/hring?rev=37095ba#37095bad7b158ad29b4b91c7efb806cec6d0b47d"
 dependencies = [
  "eyre",
  "memmap2",

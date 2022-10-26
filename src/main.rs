@@ -1,3 +1,6 @@
+#![allow(incomplete_features)]
+#![feature(async_fn_in_trait)]
+
 use std::{
     net::ToSocketAddrs,
     os::unix::prelude::{AsRawFd, FromRawFd},
@@ -6,11 +9,7 @@ use std::{
 };
 
 use color_eyre::eyre;
-use hring::{
-    bufpool::AggBuf,
-    tokio_uring::net::TcpStream,
-    types::{ConnectionDriver, RequestDriver},
-};
+use hring::{h1, tokio_uring::net::TcpStream, AggBuf, Body, IoChunkable, WriteOwned};
 use rustls::ServerConfig;
 use tokio::net::TcpListener;
 use tracing::info;
@@ -43,17 +42,17 @@ async fn async_main() -> eyre::Result<()> {
     let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
     let acceptor = Rc::new(acceptor);
 
-    let conn_dv = Rc::new(ConnDv {});
-
     let ln = TcpListener::bind("[::]:7000").await?;
     info!("Listening on {}", ln.local_addr()?);
+
+    let conf = Rc::new(h1::ServerConf::default());
 
     while let Ok((stream, remote_addr)) = ln.accept().await {
         hring::tokio_uring::spawn({
             let acceptor = acceptor.clone();
-            let conn_dv = conn_dv.clone();
+            let conf = conf.clone();
             async move {
-                if let Err(e) = handle_conn(acceptor, conn_dv, stream, remote_addr).await {
+                if let Err(e) = handle_conn(acceptor, stream, remote_addr, conf).await {
                     tracing::error!(%e, "Error handling connection");
                 }
             }
@@ -65,9 +64,9 @@ async fn async_main() -> eyre::Result<()> {
 
 async fn handle_conn(
     acceptor: Rc<tokio_rustls::TlsAcceptor>,
-    conn_dv: Rc<ConnDv>,
     stream: tokio::net::TcpStream,
     remote_addr: std::net::SocketAddr,
+    conf: Rc<h1::ServerConf>,
 ) -> Result<(), color_eyre::Report> {
     info!("Accepted connection from {remote_addr}");
     let stream = acceptor.accept(stream).await?;
@@ -86,32 +85,102 @@ async fn handle_conn(
 
     let buf = AggBuf::default();
     buf.write().put(&drained[..])?;
-    hring::proto::h1::proxy(conn_dv, stream, buf).await?;
+
+    hring::h1::serve(stream, conf, buf, SDriver {}).await?;
 
     Ok(())
 }
 
-struct ConnDv {}
+struct SDriver {}
 
-impl ConnectionDriver for ConnDv {
-    type RequestDriver = ReqDv;
+impl h1::ServerDriver for SDriver {
+    async fn handle<T: WriteOwned>(
+        &self,
+        req: hring::Request,
+        req_body: &mut impl Body,
+        respond: h1::Responder<T, h1::ExpectResponseHeaders>,
+    ) -> eyre::Result<h1::Responder<T, h1::ResponseDone>> {
+        info!("Handling request!");
 
-    fn steer_request(&self, _req: &hring::types::Request) -> eyre::Result<Self::RequestDriver> {
-        Ok(ReqDv {})
+        let addr = "httpbingo.org:80"
+            .to_socket_addrs()?
+            .next()
+            .expect("http bingo should be up");
+        let transport = Rc::new(TcpStream::connect(addr).await?);
+        info!("Connected to httpbingo");
+
+        let driver = CDriver { respond };
+
+        let (transport, respond) = h1::request(transport, req, req_body, driver).await?;
+        // don't re-use transport for now
+        drop(transport);
+
+        Ok(respond)
     }
 }
 
-struct ReqDv {}
+struct CDriver<T>
+where
+    T: WriteOwned,
+{
+    respond: h1::Responder<T, h1::ExpectResponseHeaders>,
+}
 
-impl RequestDriver for ReqDv {
-    fn upstream_addr(&self) -> eyre::Result<std::net::SocketAddr> {
-        Ok("httpbingo.org:80"
-            .to_socket_addrs()?
-            .next()
-            .expect("http bingo should be up"))
+impl<T> h1::ClientDriver for CDriver<T>
+where
+    T: WriteOwned,
+{
+    type Return = h1::Responder<T, h1::ResponseDone>;
+
+    async fn on_informational_response(&self, _res: hring::Response) -> eyre::Result<()> {
+        // ignore informational responses
+
+        Ok(())
     }
 
-    fn keep_header(&self, _name: &str) -> bool {
-        true
+    async fn on_final_response(
+        self,
+        res: hring::Response,
+        body: &mut impl Body,
+    ) -> eyre::Result<Self::Return> {
+        info!("Client got final response");
+        let respond = self.respond;
+
+        let mut respond = respond.write_final_response(res).await?;
+
+        loop {
+            info!("Reading from body {body:?}");
+            match body.next_chunk().await? {
+                hring::BodyChunk::Buf(buf) => {
+                    info!("Client got chunk of len {}", buf.len());
+                    respond = respond.write_body_chunk(buf).await?;
+                }
+                hring::BodyChunk::AggSlice(slice) => {
+                    let mut offset = 0;
+                    while let Some(buf) = slice.next_chunk(offset) {
+                        offset += buf.len() as u32;
+                        info!(
+                            "Client got chunk of len {} (via aggslice), offset is now {offset}",
+                            buf.len()
+                        );
+                        match buf {
+                            hring::IoChunk::Static(_) => unreachable!(),
+                            hring::IoChunk::Vec(_) => unreachable!(),
+                            hring::IoChunk::Buf(buf) => {
+                                respond = respond.write_body_chunk(buf).await?;
+                            }
+                        }
+                    }
+                    info!("End of aggslice");
+                }
+                hring::BodyChunk::Eof => {
+                    // all good
+                    info!("Client got EOF");
+                    break;
+                }
+            }
+        }
+
+        respond.finish_body(None).await
     }
 }
