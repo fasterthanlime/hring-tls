@@ -9,7 +9,10 @@ use std::{
 };
 
 use color_eyre::eyre;
-use hring::{h1, tokio_uring::net::TcpStream, AggBuf, Body, WriteOwned};
+use hring::{
+    h1, tokio_uring::net::TcpStream, Body, Encoder, ExpectResponseHeaders, Responder, ResponseDone,
+    RollMut, ServerDriver,
+};
 use rustls::ServerConfig;
 use tokio::net::TcpListener;
 use tracing::{debug, info};
@@ -42,7 +45,7 @@ async fn async_main() -> eyre::Result<()> {
     let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
     let acceptor = Rc::new(acceptor);
 
-    let ln = TcpListener::bind("[::]:7000").await?;
+    let ln = TcpListener::bind("[::]:7007").await?;
     info!("Listening on {}", ln.local_addr()?);
 
     let conf = Rc::new(h1::ServerConf::default());
@@ -83,8 +86,8 @@ async fn handle_conn(
     std::mem::forget(stream);
     let stream = unsafe { TcpStream::from_raw_fd(fd) };
 
-    let buf = AggBuf::default();
-    buf.write().put(&drained[..])?;
+    let mut buf = RollMut::alloc()?;
+    buf.put(&drained[..])?;
 
     hring::h1::serve(stream, conf, buf, SDriver {}).await?;
 
@@ -93,18 +96,14 @@ async fn handle_conn(
 
 struct SDriver {}
 
-impl h1::ServerDriver for SDriver {
-    async fn handle<T: WriteOwned>(
+impl ServerDriver for SDriver {
+    async fn handle<E: Encoder>(
         &self,
         req: hring::Request,
         req_body: &mut impl Body,
-        respond: h1::Responder<T, h1::ExpectResponseHeaders>,
-    ) -> eyre::Result<h1::Responder<T, h1::ResponseDone>> {
-        info!(
-            "Handling {} {}",
-            req.method.to_string_lossy(),
-            req.path.to_string_lossy()
-        );
+        respond: Responder<E, ExpectResponseHeaders>,
+    ) -> eyre::Result<Responder<E, ResponseDone>> {
+        info!("Handling {:?} {}", req.method, req.path);
 
         let addr = "httpbingo.org:80"
             .to_socket_addrs()?
@@ -123,20 +122,20 @@ impl h1::ServerDriver for SDriver {
     }
 }
 
-struct CDriver<T>
+struct CDriver<E>
 where
-    T: WriteOwned,
+    E: Encoder,
 {
-    respond: h1::Responder<T, h1::ExpectResponseHeaders>,
+    respond: Responder<E, ExpectResponseHeaders>,
 }
 
-impl<T> h1::ClientDriver for CDriver<T>
+impl<E> h1::ClientDriver for CDriver<E>
 where
-    T: WriteOwned,
+    E: Encoder,
 {
-    type Return = h1::Responder<T, h1::ResponseDone>;
+    type Return = Responder<E, ResponseDone>;
 
-    async fn on_informational_response(&self, _res: hring::Response) -> eyre::Result<()> {
+    async fn on_informational_response(&mut self, _res: hring::Response) -> eyre::Result<()> {
         // ignore informational responses
 
         Ok(())
@@ -147,11 +146,7 @@ where
         res: hring::Response,
         body: &mut impl Body,
     ) -> eyre::Result<Self::Return> {
-        info!(
-            "Client got final response: {} {}",
-            res.code,
-            res.reason.to_string_lossy()
-        );
+        info!("Client got final response: {}", res.status);
         let respond = self.respond;
 
         let mut respond = respond.write_final_response(res).await?;
@@ -161,7 +156,7 @@ where
             match body.next_chunk().await? {
                 hring::BodyChunk::Chunk(chunk) => {
                     debug!("Client got chunk of len {}", chunk.len());
-                    respond = respond.write_chunk(chunk).await?;
+                    respond.write_chunk(chunk).await?;
                 }
                 hring::BodyChunk::Done { trailers } => {
                     break trailers;
