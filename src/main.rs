@@ -10,8 +10,8 @@ use std::{
 
 use color_eyre::eyre;
 use hring::{
-    h1, tokio_uring::net::TcpStream, Body, Encoder, ExpectResponseHeaders, Responder, ResponseDone,
-    RollMut, ServerDriver,
+    h1, h2, tokio_uring::net::TcpStream, Body, Encoder, ExpectResponseHeaders, Responder,
+    ResponseDone, RollMut, ServerDriver,
 };
 use rustls::ServerConfig;
 use tokio::net::TcpListener;
@@ -41,6 +41,7 @@ async fn async_main() -> eyre::Result<()> {
         .unwrap();
 
     server_config.enable_secret_extraction = true;
+    server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
     let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(server_config));
     let acceptor = Rc::new(acceptor);
@@ -48,14 +49,16 @@ async fn async_main() -> eyre::Result<()> {
     let ln = TcpListener::bind("[::]:7007").await?;
     info!("Listening on {}", ln.local_addr()?);
 
-    let conf = Rc::new(h1::ServerConf::default());
+    let h1_conf = Rc::new(h1::ServerConf::default());
+    let h2_conf = Rc::new(h2::ServerConf::default());
 
     while let Ok((stream, remote_addr)) = ln.accept().await {
         hring::tokio_uring::spawn({
             let acceptor = acceptor.clone();
-            let conf = conf.clone();
+            let h1_conf = h1_conf.clone();
+            let h2_conf = h2_conf.clone();
             async move {
-                if let Err(e) = handle_conn(acceptor, stream, remote_addr, conf).await {
+                if let Err(e) = handle_conn(acceptor, stream, remote_addr, h1_conf, h2_conf).await {
                     tracing::error!(%e, "Error handling connection");
                 }
             }
@@ -69,12 +72,18 @@ async fn handle_conn(
     acceptor: Rc<tokio_rustls::TlsAcceptor>,
     stream: tokio::net::TcpStream,
     remote_addr: std::net::SocketAddr,
-    conf: Rc<h1::ServerConf>,
+    h1_conf: Rc<h1::ServerConf>,
+    h2_conf: Rc<h2::ServerConf>,
 ) -> Result<(), color_eyre::Report> {
     info!("Accepted connection from {remote_addr}");
     let stream = acceptor.accept(stream).await?;
 
-    debug!("Performed TLS handshake");
+    let sc = stream.get_ref().1;
+    let alpn_proto = sc
+        .alpn_protocol()
+        .and_then(|p| std::str::from_utf8(p).ok().map(|s| s.to_string()));
+    debug!(?alpn_proto, "Performed TLS handshake");
+
     let stream = ktls::config_ktls_server(stream)?;
 
     debug!("Set up kTLS");
@@ -89,7 +98,19 @@ async fn handle_conn(
     let mut buf = RollMut::alloc()?;
     buf.put(&drained[..])?;
 
-    hring::h1::serve(stream, conf, buf, SDriver {}).await?;
+    let driver = SDriver {};
+
+    match alpn_proto.as_deref() {
+        Some("h2") => {
+            info!("Using HTTP/2");
+            hring::h2::serve(stream, h2_conf, buf, Rc::new(driver)).await?;
+        }
+        Some("http/1.1") | None => {
+            info!("Using HTTP/1.1");
+            hring::h1::serve(stream, h1_conf, buf, driver).await?;
+        }
+        Some(other) => return Err(eyre::eyre!("Unsupported ALPN protocol: {}", other)),
+    }
 
     Ok(())
 }
