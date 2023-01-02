@@ -40,6 +40,7 @@ async fn async_main() -> eyre::Result<()> {
         .with_single_cert(vec![rustls::Certificate(crt)], rustls::PrivateKey(key))
         .unwrap();
 
+    server_config.key_log = Arc::new(rustls::KeyLogFile::new());
     server_config.enable_secret_extraction = true;
     server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
