@@ -13,6 +13,7 @@ use hring::{
     h1, h2, tokio_uring::net::TcpStream, Body, Encoder, ExpectResponseHeaders, Responder,
     ResponseDone, RollMut, ServerDriver,
 };
+use http::Version;
 use rustls::ServerConfig;
 use tokio::net::TcpListener;
 use tracing::{debug, info};
@@ -121,7 +122,7 @@ struct SDriver {}
 impl ServerDriver for SDriver {
     async fn handle<E: Encoder>(
         &self,
-        req: hring::Request,
+        mut req: hring::Request,
         req_body: &mut impl Body,
         respond: Responder<E, ExpectResponseHeaders>,
     ) -> eyre::Result<Responder<E, ResponseDone>> {
@@ -136,6 +137,7 @@ impl ServerDriver for SDriver {
 
         let driver = CDriver { respond };
 
+        req.version = Version::HTTP_11;
         let (transport, respond) = h1::request(transport, req, req_body, driver).await?;
         // don't re-use transport for now
         drop(transport);

@@ -294,6 +294,7 @@ version = "0.1.0"
 dependencies = [
  "color-eyre",
  "hring",
+ "http",
  "ktls",
  "rcgen",
  "rustls",
